@@ -32,12 +32,30 @@ const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 
 const SidebarContext = React.createContext(null)
 
+/** تشخیص زنده جهت صفحه (LTR/RTL) با واکنش به تغییر attr `dir` روی <html> */
+function useDir() {
+  const getDir = () =>
+    (typeof document !== "undefined" &&
+      (document.documentElement.getAttribute("dir") || document.dir)) || "ltr"
+
+  const [dir, setDir] = React.useState(getDir)
+
+  React.useEffect(() => {
+    if (typeof document === "undefined") return
+    const el = document.documentElement
+    const m = new MutationObserver(() => setDir(getDir()))
+    m.observe(el, { attributes: true, attributeFilter: ["dir"] })
+    return () => m.disconnect()
+  }, [])
+
+  return dir
+}
+
 function useSidebar() {
   const context = React.useContext(SidebarContext)
   if (!context) {
     throw new Error("useSidebar must be used within a SidebarProvider.")
   }
-
   return context
 }
 
@@ -53,8 +71,7 @@ function SidebarProvider({
   const isMobile = useIsMobile()
   const [openMobile, setOpenMobile] = React.useState(false)
 
-  // This is the internal state of the sidebar.
-  // We use openProp and setOpenProp for control from outside the component.
+  // internal state
   const [_open, _setOpen] = React.useState(defaultOpen)
   const open = openProp ?? _open
   const setOpen = React.useCallback(
@@ -65,19 +82,15 @@ function SidebarProvider({
       } else {
         _setOpen(openState)
       }
-
-      // This sets the cookie to keep the sidebar state.
       document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
     },
     [setOpenProp, open]
   )
 
-  // Helper to toggle the sidebar.
   const toggleSidebar = React.useCallback(() => {
     return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open)
   }, [isMobile, setOpen, setOpenMobile])
 
-  // Adds a keyboard shortcut to toggle the sidebar.
   React.useEffect(() => {
     const handleKeyDown = (event) => {
       if (
@@ -88,13 +101,10 @@ function SidebarProvider({
         toggleSidebar()
       }
     }
-
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [toggleSidebar])
 
-  // We add a state so that we can do data-state="expanded" or "collapsed".
-  // This makes it easier to style the sidebar with Tailwind classes.
   const state = open ? "expanded" : "collapsed"
 
   const contextValue = React.useMemo(
@@ -115,13 +125,11 @@ function SidebarProvider({
       <TooltipProvider delayDuration={0}>
         <div
           data-slot="sidebar-wrapper"
-          style={
-            {
-              "--sidebar-width": SIDEBAR_WIDTH,
-              "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
-              ...style,
-            }
-          }
+          style={{
+            "--sidebar-width": SIDEBAR_WIDTH,
+            "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
+            ...style,
+          }}
           className={cn(
             "group/sidebar-wrapper has-data-[variant=inset]:bg-sidebar flex min-h-svh w-full",
             className
@@ -135,8 +143,9 @@ function SidebarProvider({
   )
 }
 
+/** سایدبار: سمت را خودکار از جهت صفحه تعیین می‌کند مگر اینکه prop side را خودت بدهی */
 function Sidebar({
-  side = "left",
+  side: sideProp, // ← دیگر مقدار پیش‌فرض "left" نمی‌گذاریم
   variant = "sidebar",
   collapsible = "offcanvas",
   className,
@@ -144,6 +153,8 @@ function Sidebar({
   ...props
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
+  const dir = useDir()
+  const side = sideProp ?? (dir === "rtl" ? "right" : "left") // ← کلید RTL
 
   if (collapsible === "none") {
     return (
@@ -172,12 +183,10 @@ function Sidebar({
           data-slot="sidebar"
           data-mobile="true"
           className="bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0 [&>button]:hidden"
-          style={
-            {
-              "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
-            }
-          }
-          side={side}
+          style={{
+            "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
+          }}
+          side={side} // ← موبایل هم راست/چپ می‌شود
         >
           <div className="flex h-full w-full flex-col">{children}</div>
         </SheetContent>
@@ -191,10 +200,10 @@ function Sidebar({
       data-state={state}
       data-collapsible={state === "collapsed" ? collapsible : ""}
       data-variant={variant}
-      data-side={side}
+      data-side={side} // ← برای CSS وابسته به data-side
       data-slot="sidebar"
     >
-      {/* This is what handles the sidebar gap on desktop */}
+      {/* فاصله سایدبار در دسکتاپ */}
       <div
         className={cn(
           "relative h-svh w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear",
@@ -211,7 +220,7 @@ function Sidebar({
           side === "left"
             ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
             : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
-          // Adjust the padding for floating and inset variants.
+          // padding برای حالت‌های floating و inset
           variant === "floating" || variant === "inset"
             ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
             : "group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-r group-data-[side=right]:border-l",
@@ -230,13 +239,8 @@ function Sidebar({
   )
 }
 
-function SidebarTrigger({
-  className,
-  onClick,
-  ...props
-}) {
+function SidebarTrigger({ className, onClick, ...props }) {
   const { toggleSidebar } = useSidebar()
-
   return (
     <Button
       data-sidebar="trigger"
@@ -258,7 +262,6 @@ function SidebarTrigger({
 
 function SidebarRail({ className, ...props }) {
   const { toggleSidebar } = useSidebar()
-
   return (
     <button
       data-sidebar="rail"
@@ -295,10 +298,7 @@ function SidebarInset({ className, ...props }) {
   )
 }
 
-function SidebarInput({
-  className,
-  ...props
-}) {
+function SidebarInput({ className, ...props }) {
   return (
     <Input
       data-slot="sidebar-input"
@@ -331,10 +331,7 @@ function SidebarFooter({ className, ...props }) {
   )
 }
 
-function SidebarSeparator({
-  className,
-  ...props
-    }) {
+function SidebarSeparator({ className, ...props }) {
   return (
     <Separator
       data-slot="sidebar-separator"
@@ -370,13 +367,8 @@ function SidebarGroup({ className, ...props }) {
   )
 }
 
-function SidebarGroupLabel({
-  className,
-  asChild = false,
-  ...props
-}) {
+function SidebarGroupLabel({ className, asChild = false, ...props }) {
   const Comp = asChild ? Slot : "div"
-
   return (
     <Comp
       data-slot="sidebar-group-label"
@@ -391,20 +383,14 @@ function SidebarGroupLabel({
   )
 }
 
-function SidebarGroupAction({
-  className,
-  asChild = false,
-  ...props
-}) {
+function SidebarGroupAction({ className, asChild = false, ...props }) {
   const Comp = asChild ? Slot : "button"
-
   return (
     <Comp
       data-slot="sidebar-group-action"
       data-sidebar="group-action"
       className={cn(
         "text-sidebar-foreground ring-sidebar-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground absolute top-3.5 right-3 flex aspect-square w-5 items-center justify-center rounded-md p-0 outline-hidden transition-transform focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
-        // Increases the hit area of the button on mobile.
         "after:absolute after:-inset-2 md:after:hidden",
         "group-data-[collapsible=icon]:hidden",
         className
@@ -414,10 +400,7 @@ function SidebarGroupAction({
   )
 }
 
-function SidebarGroupContent({
-  className,
-  ...props
-}) {
+function SidebarGroupContent({ className, ...props }) {
   return (
     <div
       data-slot="sidebar-group-content"
@@ -495,14 +478,10 @@ function SidebarMenuButton({
     />
   )
 
-  if (!tooltip) {
-    return button
-  }
+  if (!tooltip) return button
 
   if (typeof tooltip === "string") {
-    tooltip = {
-      children: tooltip,
-    }
+    tooltip = { children: tooltip }
   }
 
   return (
@@ -518,21 +497,14 @@ function SidebarMenuButton({
   )
 }
 
-function SidebarMenuAction({
-  className,
-  asChild = false,
-  showOnHover = false,
-  ...props
-}) {
+function SidebarMenuAction({ className, asChild = false, showOnHover = false, ...props }) {
   const Comp = asChild ? Slot : "button"
-
   return (
     <Comp
       data-slot="sidebar-menu-action"
       data-sidebar="menu-action"
       className={cn(
         "text-sidebar-foreground ring-sidebar-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground peer-hover/menu-button:text-sidebar-accent-foreground absolute top-1.5 right-1 flex aspect-square w-5 items-center justify-center rounded-md p-0 outline-hidden transition-transform focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
-        // Increases the hit area of the button on mobile.
         "after:absolute after:-inset-2 md:after:hidden",
         "peer-data-[size=sm]/menu-button:top-1",
         "peer-data-[size=default]/menu-button:top-1.5",
@@ -547,10 +519,7 @@ function SidebarMenuAction({
   )
 }
 
-function SidebarMenuBadge({
-  className,
-  ...props
-}) {
+function SidebarMenuBadge({ className, ...props }) {
   return (
     <div
       data-slot="sidebar-menu-badge"
@@ -569,16 +538,8 @@ function SidebarMenuBadge({
   )
 }
 
-function SidebarMenuSkeleton({
-  className,
-  showIcon = false,
-  ...props
-}) {
-  // Random width between 50 to 90%.
-  const width = React.useMemo(() => {
-    return `${Math.floor(Math.random() * 40) + 50}%`
-  }, [])
-
+function SidebarMenuSkeleton({ className, showIcon = false, ...props }) {
+  const width = React.useMemo(() => `${Math.floor(Math.random() * 40) + 50}%`, [])
   return (
     <div
       data-slot="sidebar-menu-skeleton"
@@ -586,20 +547,11 @@ function SidebarMenuSkeleton({
       className={cn("flex h-8 items-center gap-2 rounded-md px-2", className)}
       {...props}
     >
-      {showIcon && (
-        <Skeleton
-          className="size-4 rounded-md"
-          data-sidebar="menu-skeleton-icon"
-        />
-      )}
+      {showIcon && <Skeleton className="size-4 rounded-md" data-sidebar="menu-skeleton-icon" />}
       <Skeleton
         className="h-4 max-w-(--skeleton-width) flex-1"
         data-sidebar="menu-skeleton-text"
-        style={
-          {
-            "--skeleton-width": width,
-          }
-        }
+        style={{ "--skeleton-width": width }}
       />
     </div>
   )
@@ -620,10 +572,7 @@ function SidebarMenuSub({ className, ...props }) {
   )
 }
 
-function SidebarMenuSubItem({
-  className,
-  ...props
-}) {
+function SidebarMenuSubItem({ className, ...props }) {
   return (
     <li
       data-slot="sidebar-menu-sub-item"
@@ -640,9 +589,8 @@ function SidebarMenuSubButton({
   isActive = false,
   className,
   ...props
-  }) {
+}) {
   const Comp = asChild ? Slot : "a"
-
   return (
     <Comp
       data-slot="sidebar-menu-sub-button"
